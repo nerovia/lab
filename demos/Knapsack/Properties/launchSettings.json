@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "Knapsack": {
+      "commandName": "Project",
+      "commandLineArgs": "rand 15 7 -v -s 123"
+    }
+  }
+}
