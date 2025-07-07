@@ -1,0 +1,151 @@
+#version 300 es
+
+// this shader is based on (https://www.shadertoy.com/view/3tyXWw)
+// 
+
+precision mediump float;
+
+#include "geometry.glsl"
+
+
+const int MAX_INVOLUTIONS = 32;
+const float THICKNESS = 0.02;
+
+
+uniform vec2 u_resolution;
+uniform vec2 u_mouse;
+
+in vec4 v_position;
+in vec2 v_texcoord;
+
+out vec4 o_color;
+
+vec2 genpoint = vec2(0.3, 0.2);
+ivec3 symbol = ivec3(6, 4, 2);
+
+
+
+
+vec2 involution(vec2 uv, vec3 edges[3], out float parity) {
+    
+    // we try to get the uv position back into the fundametal domain, by reflecting it a bunch of times
+    
+    parity = 1.0;
+    for (int i = 0; i < 32; ++i) {
+
+        // reflection on j-th edge
+        int j = 0;
+        while (j < 3) {
+            float d = sd_line(uv, edges[j]); // distance to the j-th edge
+            
+            // if the point is on the wrong side of the edge (not near the triangle) 
+            if (d > 0.) { 
+                // reflect
+                uv -= edges[j].xy * d * 2.0; // we subtract because, the normal vectors point outwards of the triangle
+                parity *= -1.0;
+                break;
+            }
+            ++j; // count how many times the point is on the correct side
+        }
+
+        if (j == 3) // if the point is whitin the fundamental domain
+            break;
+    }
+
+    return uv;
+}
+
+
+void draw(vec3 c, float t, float d) {
+    o_color.rgb = mix(o_color.rgb, c, 1.0-step(t, d));
+}
+
+
+void main() {
+
+    // position
+    vec2 aspect = u_resolution / max(u_resolution.x, u_resolution.y) * 4.0;
+    vec2 pos = v_position.xy * aspect;
+    vec2 uv = pos;
+    vec2 mouse = ((u_mouse.xy / u_resolution.xy)*2.0 -vec2(1.0)) * aspect;
+
+    // get triangle angles from wythoff symbol
+    vec3 angles = vec3(PI) / vec3(symbol.xyz);
+    vec3 sins = sin(angles);
+
+    // the wythoff symbol describes a right triangle
+    // get the side length, where c=1
+    float a = sins.x / sins.z;
+    float b = sins.y / sins.z;
+    float c = 1.0;
+
+    // corner positions
+    vec2 A = vec2(0, 0);
+    vec2 B = vec2(1, 0);
+    vec2 C = vec2(cos(angles.x), sin(angles.y)) * b;
+    
+    // triangle edge planes defined by a (orthogonal) normal vector
+    // the normal vector is described by the xy components.
+    // the z component describes the distance of the plane from the origin.
+    float sinzx = sin(angles.z + angles.x);
+    vec3 edges[3];
+    edges[0] = vec3(-sin(angles.x), cos(angles.x), 0);        // orthogonal vector on side b
+    edges[1] = vec3(0., -1., 0);                             // orthogonal vector on side c
+    edges[2] = vec3(sinzx, -cos(angles.z + angles.x), sinzx); // orthogonal vector on side a 
+
+    float parity;
+    genpoint = involution(mouse, edges, parity);
+    uv = involution(uv, edges, parity);
+
+    float sides[3];
+    float linedist = 1e6;
+
+    for (int k = 0; k < 3; ++k) {
+
+        vec2 gk = edges[k].xy * (dot(genpoint, edges[k].xy) - edges[k].z);
+        vec2 ngk = normalize(gk).yx * vec2(-1, 1);
+
+        sides[k] = dot(uv - genpoint, ngk); // distance to separator
+
+        linedist = min(linedist, sd_segment(uv, genpoint, genpoint-gk));
+        
+    }
+
+
+    int poly;
+    if (sides[1] < 0.0 && sides[2] > 0.0)
+        poly = 0;
+    else if(sides[2] < 0.0 && sides[0] > 0.0)
+        poly = 1;
+    else
+        poly = 2;
+
+
+
+
+
+
+
+    // shade parity
+    o_color = vec4(1);
+
+    o_color.rgb = poly == 0 ? vec3(0.9725, 0.8157, 0.1137) : (poly == 1 ? vec3(0.8588, 0.5882, 0.9686) : vec3(0.5216, 0.9765, 0.9529));
+    //float d = sd_point(uv, vec2(0.1, 0.2));
+    float d = ud_triangle(uv, edges);
+ 
+    o_color.rgb = mix(o_color.rgb, vec3(0.6275, 0.2078, 0.2078), 0.3 * step(0.0, parity));
+
+    // col = mix(col, vec3(0), 1.0-step(0.01, -d));
+    
+    
+    //col = mix(col, vec3(0), 1.0 - step(0.02, p));
+
+    //col = mix(col, vec3(0), 1.0-step(1.0, sd_point(pos, mouse)));
+    
+        
+    draw(vec3(1), THICKNESS, linedist);
+    draw(vec3(0), THICKNESS, sd_point(uv, genpoint));
+    
+
+
+}
