@@ -6,12 +6,10 @@ const float TOL = 1e-3;
 const float PI = acos(-1.0);
 
 struct Material {
-    vec3 ambient;  // ambient color
-    vec3 diffuse;  // diffuse color
-    vec3 specular; // specular color
-    float ka;      // ambient factor
+    vec3 albedo;  // ambient color
+    vec3 emissiv; // specular color
+    float ke;      // emissiv factor
     float kd;      // diffuse factor
-    float ks;      // specular factor
     float kr;      // reflection factor
     float kt;      // transmission factor
     float n;       // shinyness coefficent
@@ -35,60 +33,42 @@ struct Sphere {
 struct RayCast {
     vec3 origin;        // the origin of the ray
     vec3 direction;     // the nomalized direction of the ray
+    bool has_hit;
     float hit_distance; // the distance to the closest instersection
     vec3 hit_normal;    // the normal vector of the intersected surface
     vec3 hit_position;  // the world position of the intersection
     vec3 hit_texture;     
-    int hit_id;         // the object that was indersected
-    float weight;
+    int hit_material;         // the object that was indersected
 };
 
 
-Material MATERIALS[4] = Material[4](
+Material MATERIALS[3] = Material[3](
     Material(
-        vec3(1, 0, 0), // ambient color
-        vec3(1.0, 0.3216, 0.3216), // diffuse color
-        vec3(1, 1, 1), // specular color
-        0.3,  // [ka] ambient factor
-        0.7,  // [kd] diffuse factor
-        0.7,  // [ks] specular factor
+        vec3(1, 0, 0), // albedo color
+        vec3(0), // emissiv color
+        0.0,  // [ke] emissiv factor
+        1.0,  // [kd] diffuse factor
         0.1,  // [kr] reflection factor
         0.0,  // [kt] transmission factor
         200.0, // shinyness coefficent
         1.2  // refraction index
     ),
     Material(
-        vec3(0.1922, 0.1922, 0.1922), // ambient color
-        vec3(0.149, 0.3569, 0.5255), // diffuse color
-        vec3(1.0, 1.0, 1.0), // specular color
-        0.3,  // [ka] ambient factor
-        0.2,  // [kd] diffuse factor
-        0.3,  // [ks] specular factor
-        0.4,  // [kr] reflection factor
-        0.5,  // [kt] transmission factor
-        20.0, // shinyness coefficent
-        1.05  // refraction index
-    ),
-    Material(
-        vec3(0.4706, 0.9255, 0.7804), // ambient color
-        vec3(0.4706, 0.9255, 0.7804), // diffuse color
-        vec3(1, 1, 1), // specular color
-        0.3,  // [ka] ambient factor
-        0.7,  // [kd] diffuse factor
-        0.1,  // [ks] specular factor
-        0.0,  // [kr] reflection factor
+        vec3(0.4706, 0.9255, 0.7804), // albedo color
+        vec3(0), // emissiv color
+        0.0,  // [ke] emissiv factor
+        1.0,  // [kd] diffuse factor
+        0.1,  // [kr] reflection factor
         0.0,  // [kt] transmission factor
         200.0, // shinyness coefficent
         1.2  // refraction index
     ),
     Material(
-        vec3(0.5569, 0.5569, 0.5569), // ambient color
-        vec3(0.6588, 0.7922, 0.851), // diffuse color
-        vec3(1, 1, 1), // specular color
-        0.0,  // [ka] ambient factor
-        0.1,  // [kd] diffuse factor
-        0.0,  // [ks] specular factor
-        0.8,  // [kr] reflection factor
+        vec3(0), // albedo color
+        vec3(0.9765, 0.9882, 0.902), // emissiv color
+        3.0,  // [ke] emissiv factor
+        0.0,  // [kd] diffuse factor
+        0.1,  // [kr] reflection factor
         0.0,  // [kt] transmission factor
         200.0, // shinyness coefficent
         1.2  // refraction index
@@ -99,17 +79,17 @@ const vec3 BACKGROUND = vec3(0.651, 0.8471, 0.898);
 const float FOCAL_LENGTH = 10.0;
 
 Plane PLANES[6] = Plane[6](
-    Plane(vec3(-2, 0, 0), vec3(1, 0, 0), 2),
-    Plane(vec3(2, 0, 0), vec3(-1, 0, 0), 2),
-    Plane(vec3(0, 0, 4), normalize(vec3(0.2, 0, -1)), 3),
-    Plane(vec3(0, 0, -8), vec3(0, 0, -1), 3),
-    Plane(vec3(0, -2, 0), vec3(0, 1, 0), 2),
-    Plane(vec3(0, 2, 0), vec3(0, -1, 0), 2)
+    Plane(vec3(-2, 0, 0), vec3(1, 0, 0), 1),
+    Plane(vec3(2, 0, 0), vec3(-1, 0, 0), 1),
+    Plane(vec3(0, 0, 4), vec3(0, 0, -1), 1),
+    Plane(vec3(0, 0, -4), vec3(0, 0, -1), 1),
+    Plane(vec3(0, -2, 0), vec3(0, 1, 0), 1),
+    Plane(vec3(0, 2, 0), vec3(0, -1, 0), 1)
 );
 
 Sphere SPHERES[2] = Sphere[2](
-    Sphere(vec3(0.5, 0, 0), .3, 0),
-    Sphere(vec3(-0.3, -1.2, 0), 0.8, 1)
+    Sphere(vec3(0), .3, 2),
+    Sphere(vec3(0.0, -1.2, 1.8), 0.8, 0)
 );
 
 Sphere LIGHT = Sphere(vec3(0, 1.5, 0), .05, -1);
@@ -122,13 +102,32 @@ uniform sampler2D u_texture_0;
 
 out vec4 frag_color;
 
+int seed;
 
-
-float rand (vec2 st) {
-    return fract(sin(dot(st.xy,
-                         vec2(12.9898,78.233)))*
-        43758.5453123);
+int xorshift(in int value) {
+    // Xorshift*32
+    // Based on George Marsaglia's work: http://www.jstatsoft.org/v08/i14/paper
+    value ^= value << 13;
+    value ^= value >> 17;
+    value ^= value << 5;
+    return value;
 }
+
+float rand(inout int seed) {
+    seed = xorshift(seed);
+    // FIXME: This should have been a seed mapped from MIN..MAX to 0..1 instead
+    return abs(fract(float(seed) / 3141.592653));
+}
+
+// highp float rand(vec2 co)
+// {
+//     highp float a = 12.9898;
+//     highp float b = 78.233;
+//     highp float c = 43758.5453;
+//     highp float dt= dot(co.xy ,vec2(a,b));
+//     highp float sn= mod(dt,3.14);
+//     return fract(sin(sn) * c);
+// }
 
 
 void intersect_plane(inout RayCast ray, in Plane plane) {
@@ -158,7 +157,8 @@ void intersect_plane(inout RayCast ray, in Plane plane) {
     ray.hit_distance = d;
     ray.hit_position = q;
     ray.hit_normal = n;
-    ray.hit_id = plane.material_id;
+    ray.hit_material = plane.material_id;
+    ray.has_hit = true;
 
     // vec3 up = vec3(0, 1, 0); // since all n are on xz-plane right now
     // vec3 tangent = cross(up, n);
@@ -204,7 +204,8 @@ void intersect_sphere(inout RayCast ray, in Sphere sphere) {
     ray.hit_distance = d;
     ray.hit_position = q;
     ray.hit_normal = n;
-    ray.hit_id = sphere.material_id;
+    ray.hit_material = sphere.material_id;
+    ray.has_hit = true;
 }
 
 
@@ -214,7 +215,7 @@ RayCast ray_cast(vec3 origin, vec3 direction) {
     ray.origin = origin;
     ray.direction = normalize(direction);
     ray.hit_distance = 1e10;
-    ray.hit_id = -1;
+    ray.has_hit = false;
 
     // test all objects in scene
     for (int i = 0; i < SPHERES.length(); i++)
@@ -227,12 +228,33 @@ RayCast ray_cast(vec3 origin, vec3 direction) {
 }
 
 
-vec3 shade(in RayCast ray) {
-    if (ray.hit_id < 0)
+vec3 sample_hemisphere(vec3 n) {
+    float u1 = rand(seed);
+    float u2 = rand(seed);
+
+    float r = sqrt(u1);
+    float theta = 2.0 * PI * u2;
+
+    // Sample in local tangent space (Y-up)
+    vec3 localDir = vec3(r * cos(theta), sqrt(1.0 - u1), r * sin(theta));
+
+    // Orthonormal basis: Tangent, Bitangent, Normal
+    vec3 tangent = normalize(cross(abs(n.y) < 0.999 ? vec3(0,1,0) : vec3(1,0,0), n));
+    vec3 bitangent = cross(n, tangent);
+
+    // Transform to world space
+    return localDir.x * tangent + localDir.y * n + localDir.z * bitangent;
+}
+
+
+vec3 ray_trace(vec3 origin, vec3 direction) {
+    RayCast ray = ray_cast(origin, direction);
+
+    if (!ray.has_hit)
         return BACKGROUND;
     
-    Material m = MATERIALS[ray.hit_id];
-    vec3 color = m.ka * m.ambient ;
+    Material m = MATERIALS[ray.hit_material];
+    vec3 color = 0.2 * m.albedo;
     vec3 light = LIGHT.center;
 
     vec3 n = ray.hit_normal;
@@ -245,59 +267,46 @@ vec3 shade(in RayCast ray) {
 
     RayCast shadow_ray = ray_cast(ray.hit_position, l);
     if (shadow_ray.hit_distance > distance(light, ray.hit_position)) {
-
-        color += m.kd * d * m.diffuse;
-        color += m.ks * pow(s, m.n) * m.specular;
+        color += m.kd * d * m.albedo;
+        color += 0.4 * pow(s, 4.0) * vec3(1);
     }
 
     return color;
 }
 
-vec3 trace(RayCast ray) {
-    const int K = 8;  // 2^N Depth 
+vec3 path_trace(vec3 origin, vec3 direction) {
+    const int N = 10;
 
-    Material m;
-    RayCast rays[K*2];
-    rays[1] = ray;
-    rays[1].weight = 1.0;
+    vec3 color = vec3(0.0);
+    vec3 weight = vec3(1.0);
 
-    vec3 color_acc = vec3(0.0, 0.0, 0.0);
+    for (int i = 0; i < N; ++i) {
+        RayCast ray = ray_cast(origin, direction);
+        Material m = MATERIALS[ray.hit_material];
 
-    // Cast rays
-    for (int i = 1; i < K; i++) {
-
-        ray = rays[i];
-        m = MATERIALS[ray.hit_id];
-
-        int r = i*2;
-        int t = i*2+1;
-
-        if (ray.hit_id >= 0) {
-            vec3 refl = reflect(ray.direction, ray.hit_normal);
-            rays[r] = ray_cast(ray.hit_position, refl);
-            rays[r].weight = ray.weight * m.kr;
-            vec3 refr = refract(ray.direction, ray.hit_normal, m.eta);
-            rays[t] = ray_cast(ray.hit_position, refr);
-            rays[t].weight = ray.weight * m.kt;
+        if (!ray.has_hit) {
+            color = weight * BACKGROUND;
+            break;
         }
-        else {
-            rays[r].hit_id = -1;
-            rays[t].hit_id = -1;
+
+        if (m.ke > 0.0) {
+            color = weight * m.emissiv * m.ke;
+            break;
         }
-    }
 
-    // Accumulate rays
-    vec3 color = shade(rays[1]);
-    for (int i = 1; i < K; i++) {
-        int r = i*2;
-        int t = i*2+1;
-        color += rays[r].weight * shade(rays[r]);
-        color += rays[t].weight * shade(rays[t]);
-    }
+        origin = ray.hit_position;
+        direction = sample_hemisphere(ray.hit_normal);
 
+        vec3 brdf = m.albedo / PI;
+        float cos_theta = max(0.0, dot(direction, ray.hit_normal));
+
+        weight *= brdf * cos_theta;
+        
+        float p = max(weight.r, max(weight.g, weight.b));
+        weight /= p;
+    }
 
     return color;
-
 }
 
 
@@ -312,8 +321,10 @@ void animate(float t) {
 void main() {
     
     vec2 mouse = u_mouse / u_resolution;
-    vec2 aspect = vec2(u_resolution / max(u_resolution.x, u_resolution.y));
-    vec2 uv = v_position.xy * aspect;
+    float aspect = 1.0 / max(u_resolution.x, u_resolution.y);
+    vec2 coord = gl_FragCoord.xy;
+    seed = int(coord.x) * int(coord.y);
+    
 
     vec3 cam_position = vec3(0, 0, -3);
     vec3 cam_lookat = vec3(0, 0, 0);
@@ -326,15 +337,30 @@ void main() {
     vec3 right = normalize(cross(forward, cam_up));
     vec3 up = cross(right, forward);
 
-    vec3 origin = cam_position;
-    vec3 direction = normalize(
-        forward * focal_length + 
-        right * uv.x * scale + 
-        up * uv.y * scale
-    );
-
     animate(u_time);
 
-    RayCast ray = ray_cast(origin, direction);
-    frag_color = vec4(trace(ray), 1);
+    const int S = 5;     // Number of subsamples in x and y direction
+    const int s = S / 2; // Index offset from pixel center
+    const float d = 0.0; // Distance offset from pixel center
+    vec3 color_acc = vec3(0);
+
+    for (int i = 0; i < S; ++i) {
+        for (int j = 0; j < S; ++j) {
+            float dx = float(i - s) * d;
+            float dy = float(j - s) * d;
+
+            vec2 uv = 2.0 * (coord + vec2(dx, dy)) * aspect - vec2(1.0);
+            vec3 origin = cam_position; 
+            vec3 direction = normalize(
+                forward * focal_length + 
+                right * uv.x * scale + 
+                up * uv.y * scale
+            );
+            color_acc += path_trace(origin, direction);
+        }
+
+
+    }
+
+    frag_color = vec4(color_acc / float(S*S), 1);
 }
