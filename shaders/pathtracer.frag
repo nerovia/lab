@@ -5,6 +5,10 @@ precision mediump float;
 const float TOL = 1e-3;
 const float PI = acos(-1.0);
 
+#define CAMERA_FOV      	0.90
+#define CAMERA_NEAR     	0.000001
+#define CAMERA_FAR      	1000.0
+
 struct Material {
     vec3 albedo;  // ambient color
     vec3 emissiv; // specular color
@@ -29,7 +33,6 @@ struct Sphere {
 };
 
 
-
 struct RayCast {
     vec3 origin;        // the origin of the ray
     vec3 direction;     // the nomalized direction of the ray
@@ -42,32 +45,42 @@ struct RayCast {
 };
 
 
-Material MATERIALS[3] = Material[3](
+Material MATERIALS[4] = Material[](
     Material(
-        vec3(1, 0, 0), // albedo color
+        vec3(1.0, 1.0, 1.0), // albedo color
         vec3(0), // emissiv color
         0.0,  // [ke] emissiv factor
-        1.0,  // [kd] diffuse factor
+        10.0,  // [kd] diffuse factor
         0.1,  // [kr] reflection factor
         0.0,  // [kt] transmission factor
         200.0, // shinyness coefficent
         1.2  // refraction index
     ),
     Material(
-        vec3(0.4706, 0.9255, 0.7804), // albedo color
+        vec3(0.7137, 0.4706, 0.9255), // albedo color
         vec3(0), // emissiv color
         0.0,  // [ke] emissiv factor
-        1.0,  // [kd] diffuse factor
+        0.1,  // [kd] diffuse factor
         0.1,  // [kr] reflection factor
         0.0,  // [kt] transmission factor
         200.0, // shinyness coefficent
         1.2  // refraction index
     ),
     Material(
-        vec3(0), // albedo color
+        vec3(1.0, 0.0314, 0.9176), // albedo color
         vec3(0.9765, 0.9882, 0.902), // emissiv color
-        3.0,  // [ke] emissiv factor
-        0.0,  // [kd] diffuse factor
+        1.0,  // [ke] emissiv factor
+        1.0,  // [kd] diffuse factor
+        0.1,  // [kr] reflection factor
+        0.0,  // [kt] transmission factor
+        200.0, // shinyness coefficent
+        1.2  // refraction index
+    ),
+    Material(
+        vec3(1.0, 1.0, 1.0), // albedo color
+        vec3(0.9765, 0.9882, 0.902), // emissiv color
+        1.0,  // [ke] emissiv factor
+        1.0,  // [kd] diffuse factor
         0.1,  // [kr] reflection factor
         0.0,  // [kt] transmission factor
         200.0, // shinyness coefficent
@@ -79,16 +92,16 @@ const vec3 BACKGROUND = vec3(0.651, 0.8471, 0.898);
 const float FOCAL_LENGTH = 10.0;
 
 Plane PLANES[6] = Plane[6](
-    Plane(vec3(-2, 0, 0), vec3(1, 0, 0), 1),
+    Plane(vec3(-3, 0, 0), vec3(1, 0, 0), 1),
     Plane(vec3(2, 0, 0), vec3(-1, 0, 0), 1),
-    Plane(vec3(0, 0, 4), vec3(0, 0, -1), 1),
+    Plane(vec3(0, 0, 10), vec3(0, 0, -1), 1),
     Plane(vec3(0, 0, -4), vec3(0, 0, -1), 1),
     Plane(vec3(0, -2, 0), vec3(0, 1, 0), 1),
-    Plane(vec3(0, 2, 0), vec3(0, -1, 0), 1)
+    Plane(vec3(0, 2, 0), vec3(0, -1, 0), 3)
 );
 
 Sphere SPHERES[2] = Sphere[2](
-    Sphere(vec3(0), .3, 2),
+    Sphere(vec3(0.0, 0.0, 1.8), .6, 2),
     Sphere(vec3(0.0, -1.2, 1.8), 0.8, 0)
 );
 
@@ -99,6 +112,7 @@ uniform float u_time;
 uniform vec2 u_resolution;
 uniform vec2 u_mouse;
 uniform sampler2D u_texture_0;
+uniform vec3 u_camera;
 
 out vec4 frag_color;
 
@@ -118,6 +132,7 @@ float rand(inout int seed) {
     // FIXME: This should have been a seed mapped from MIN..MAX to 0..1 instead
     return abs(fract(float(seed) / 3141.592653));
 }
+
 
 // highp float rand(vec2 co)
 // {
@@ -275,7 +290,7 @@ vec3 ray_trace(vec3 origin, vec3 direction) {
 }
 
 vec3 path_trace(vec3 origin, vec3 direction) {
-    const int N = 10;
+    const int N = 4;
 
     vec3 color = vec3(0.0);
     vec3 weight = vec3(1.0);
@@ -291,7 +306,7 @@ vec3 path_trace(vec3 origin, vec3 direction) {
 
         if (m.ke > 0.0) {
             color = weight * m.emissiv * m.ke;
-            break;
+            
         }
 
         origin = ray.hit_position;
@@ -300,7 +315,7 @@ vec3 path_trace(vec3 origin, vec3 direction) {
         vec3 brdf = m.albedo / PI;
         float cos_theta = max(0.0, dot(direction, ray.hit_normal));
 
-        weight *= brdf * cos_theta;
+        weight *= brdf * cos_theta * m.kd;
         
         float p = max(weight.r, max(weight.g, weight.b));
         weight /= p;
@@ -311,9 +326,11 @@ vec3 path_trace(vec3 origin, vec3 direction) {
 
 
 void animate(float t) {
-    LIGHT.center = vec3(0);
-    LIGHT.center.xz = 1.0 * vec2(sin(2.0*t), cos(2.0*t));
-    SPHERES[0].center.xz = vec2(sin(t), cos(t)) * vec2(1.1, 01.5);
+    //PLANES[5].position.y = cos(t) + 2.0;
+    MATERIALS[3].ke = 0.5 * sin(t) + 0.5;
+    //LIGHT.center = vec3(0);
+    //LIGHT.center.xz = 1.0 * vec2(sin(2.0*t), cos(2.0*t));
+    //SPHERES[0].center.xz = vec2(sin(t), cos(t)) * vec2(1.1, 01.5);
     //SPHERES[1].center.x = -0.5 * sin(t) + 1.0;
 }
 
@@ -326,11 +343,11 @@ void main() {
     seed = int(coord.x) * int(coord.y);
     
 
-    vec3 cam_position = vec3(0, 0, -3);
+    vec3 cam_position = u_camera * .2;
     vec3 cam_lookat = vec3(0, 0, 0);
     vec3 cam_up = vec3(0, 1, 0);
     float fov = 0.5 * PI;
-    float focal_length = 2.0; 
+    float focal_length = 1.0; 
 
     float scale = tan(fov * 0.5);
     vec3 forward = normalize(cam_lookat - cam_position);
@@ -339,28 +356,44 @@ void main() {
 
     animate(u_time);
 
-    const int S = 5;     // Number of subsamples in x and y direction
-    const int s = S / 2; // Index offset from pixel center
-    const float d = 0.0; // Distance offset from pixel center
+    vec2 uv = 2.0 * coord * aspect - vec2(1.0);
+    vec3 origin = cam_position; 
+    vec3 direction = normalize(
+        forward * focal_length + 
+        right * uv.x * scale + 
+        up * uv.y * scale
+    );
+
+    const int N = 32;
     vec3 color_acc = vec3(0);
-
-    for (int i = 0; i < S; ++i) {
-        for (int j = 0; j < S; ++j) {
-            float dx = float(i - s) * d;
-            float dy = float(j - s) * d;
-
-            vec2 uv = 2.0 * (coord + vec2(dx, dy)) * aspect - vec2(1.0);
-            vec3 origin = cam_position; 
-            vec3 direction = normalize(
-                forward * focal_length + 
-                right * uv.x * scale + 
-                up * uv.y * scale
-            );
-            color_acc += path_trace(origin, direction);
-        }
-
-
+    for (int i = 0; i < N; ++i) {
+        color_acc += path_trace(origin, direction);
     }
 
-    frag_color = vec4(color_acc / float(S*S), 1);
+    frag_color = vec4(color_acc / float(N), 1);
+
+    // const int S = 5;     // Number of subsamples in x and y direction
+    // const int s = S / 2; // Index offset from pixel center
+    // const float d = 0.0; // Distance offset from pixel center
+    // vec3 color_acc = vec3(0);
+
+    // for (int i = 0; i < S; ++i) {
+    //     for (int j = 0; j < S; ++j) {
+    //         float dx = float(i - s) * d;
+    //         float dy = float(j - s) * d;
+
+    //         vec2 uv = 2.0 * (coord + vec2(dx, dy)) * aspect - vec2(1.0);
+    //         vec3 origin = cam_position; 
+    //         vec3 direction = normalize(
+    //             forward * focal_length + 
+    //             right * uv.x * scale + 
+    //             up * uv.y * scale
+    //         );
+    //         color_acc += path_trace(origin, direction);
+    //     }
+
+
+    // }
+
+    // frag_color = vec4(color_acc / float(S*S), 1);
 }
